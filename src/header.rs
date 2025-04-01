@@ -1,17 +1,19 @@
 use core::fmt;
 use core::mem;
 
+use crate::reader::Reader;
+
 use {P32, P64, ElfFile};
 use zero::{read, Pod};
 
 
-pub fn parse_header<'a>(input: &'a [u8]) -> Result<Header<'a>, &'static str> {
+pub fn parse_header<'a, T: Reader + ?Sized>(input: &'a T) -> Result<Header<'a>, &'static str> {
     let size_pt1 = mem::size_of::<HeaderPt1>();
     if input.len() < size_pt1 {
         return Err("File is shorter than the first ELF header part");
     }
 
-    let header_1: &'a HeaderPt1 = read(&input[..size_pt1]);
+    let header_1: &'a HeaderPt1 = read(input.read(0, size_pt1));
     if header_1.magic != MAGIC {
         return Err("Did not find ELF magic number");
     }
@@ -24,7 +26,7 @@ pub fn parse_header<'a>(input: &'a [u8]) -> Result<Header<'a>, &'static str> {
                 return Err("File is shorter than ELF headers");
             }
             let header_2: &'a HeaderPt2_<P32> =
-                read(&input[size_pt1..size_pt1 + mem::size_of::<HeaderPt2_<P32>>()]);
+                read(input.read(size_pt1, mem::size_of::<HeaderPt2_<P32>>()));
             HeaderPt2::Header32(header_2)
         }
         Class::SixtyFour => {
@@ -33,7 +35,7 @@ pub fn parse_header<'a>(input: &'a [u8]) -> Result<Header<'a>, &'static str> {
                 return Err("File is shorter than ELF headers");
             }
             let header_2: &'a HeaderPt2_<P64> =
-                read(&input[size_pt1..size_pt1 + mem::size_of::<HeaderPt2_<P64>>()]);
+                read(input.read(size_pt1, mem::size_of::<HeaderPt2_<P64>>()));
             HeaderPt2::Header64(header_2)
         }
     };
@@ -425,7 +427,7 @@ pub enum Machine {
 
 // TODO any more constants that need to go in here?
 
-pub fn sanity_check(file: &ElfFile) -> Result<(), &'static str> {
+pub fn sanity_check(file: &ElfFile<'_, impl Reader>) -> Result<(), &'static str> {
     check!(mem::size_of::<HeaderPt1>() == 16);
     check!(file.header.pt1.magic == MAGIC, "bad magic number");
     let pt2 = &file.header.pt2;

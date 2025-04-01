@@ -1,9 +1,11 @@
+use core::fmt;
+
 use ElfFile;
 use sections;
 
 use zero::Pod;
 
-use core::fmt;
+use crate::reader::Reader;
 
 #[derive(Debug)]
 #[repr(C)]
@@ -60,7 +62,7 @@ pub trait Entry {
     fn value(&self) -> u64;
     fn size(&self) -> u64;
 
-    fn get_name<'a>(&'a self, elf_file: &ElfFile<'a>) -> Result<&'a str, &'static str>;
+    fn get_name<'a>(&'a self, elf_file: &ElfFile<'a, dyn Reader>) -> Result<&'a str, &'static str>;
 
     fn get_other(&self) -> Visibility {
         self.other().as_visibility()
@@ -75,7 +77,7 @@ pub trait Entry {
     }
 
     fn get_section_header<'a>(&'a self,
-                              elf_file: &ElfFile<'a>,
+                              elf_file: &ElfFile<'a, dyn Reader>,
                               self_index: usize)
                               -> Result<sections::SectionHeader<'a>, &'static str> {
         match self.shndx() {
@@ -123,7 +125,7 @@ impl fmt::Display for dyn Entry {
 macro_rules! impl_entry {
     ($name: ident with ElfFile::$strfunc: ident) => {
         impl Entry for $name {
-            fn get_name<'a>(&'a self, elf_file: &ElfFile<'a>) -> Result<&'a str, &'static str> {
+            fn get_name<'a>(&'a self, elf_file: &ElfFile<'a, dyn Reader>) -> Result<&'a str, &'static str> {
                 elf_file.$strfunc(self.name())
             }
 

@@ -1,3 +1,5 @@
+use crate::reader::Reader;
+
 use {ElfFile, P32, P64};
 use zero::{read, read_array, Pod};
 use header::{Class, Header};
@@ -8,7 +10,7 @@ use core::mem;
 use core::fmt;
 
 
-pub fn parse_program_header<'a>(input: &'a [u8],
+pub fn parse_program_header<'a, T: Reader + ?Sized>(input: &'a T,
                                 header: Header<'a>,
                                 index: u16)
                                 -> Result<ProgramHeader<'a>, &'static str> {
@@ -22,22 +24,22 @@ pub fn parse_program_header<'a>(input: &'a [u8],
 
     match header.pt1.class() {
         Class::ThirtyTwo => {
-            Ok(ProgramHeader::Ph32(read(&input[start..end])))
+            Ok(ProgramHeader::Ph32(read(input.read(start, end-start))))
         }
         Class::SixtyFour => {
-            Ok(ProgramHeader::Ph64(read(&input[start..end])))
+            Ok(ProgramHeader::Ph64(read(input.read(start, end-start))))
         }
         Class::None | Class::Other(_) => unreachable!(),
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct ProgramIter<'b, 'a: 'b> {
-    pub file: &'b ElfFile<'a>,
+pub struct ProgramIter<'b, 'a: 'b, T: Reader + ?Sized> {
+    pub file: &'b ElfFile<'a, T>,
     pub next_index: u16,
 }
 
-impl<'b, 'a> Iterator for ProgramIter<'b, 'a> {
+impl<'b, 'a, T: Reader + ?Sized> Iterator for ProgramIter<'b, 'a, T> {
     type Item = ProgramHeader<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -107,7 +109,7 @@ impl<'a> ProgramHeader<'a> {
         }
     }
 
-    pub fn get_data(&self, elf_file: &ElfFile<'a>) -> Result<SegmentData<'a>, &'static str> {
+    pub fn get_data<T: Reader + ?Sized>(&self, elf_file: &ElfFile<'a, T>) -> Result<SegmentData<'a>, &'static str> {
         match *self {
             ProgramHeader::Ph32(ph) => ph.get_data(elf_file),
             ProgramHeader::Ph64(ph) => ph.get_data(elf_file),
@@ -138,7 +140,7 @@ macro_rules! ph_impl {
                 self.type_.as_type()
             }
 
-            pub fn get_data<'a>(&self, elf_file: &ElfFile<'a>) -> Result<SegmentData<'a>, &'static str> {
+            pub fn get_data<'a, T: Reader + ?Sized>(&self, elf_file: &ElfFile<'a, T>) -> Result<SegmentData<'a>, &'static str> {
                 self.get_type().map(|typ| match typ {
                     Type::Null => SegmentData::Empty,
                     Type::Load | Type::Interp | Type::ShLib | Type::Phdr | Type::Tls |
@@ -168,14 +170,14 @@ macro_rules! ph_impl {
                 })
             }
 
-            pub fn raw_data<'a>(&self, elf_file: &ElfFile<'a>) -> &'a [u8] {
+            pub fn raw_data<'a, T: Reader + ?Sized>(&self, elf_file: &ElfFile<'a, T>) -> &'a [u8] {
                 assert!(self.get_type().map(|typ| typ != Type::Null).unwrap_or(false));
                 if self.file_size == 0 {
                     // When size is 0 it's not guaranteed that offset is not
                     // outside of elf_file.input range.
                     &[]
                 } else {
-                    &elf_file.input[self.offset as usize..(self.offset + self.file_size) as usize]
+                    &elf_file.input.read(self.offset as usize, self.file_size as usize)
                 }
             }
         }
@@ -308,7 +310,7 @@ pub const FLAG_R: u32 = 0x4;
 pub const FLAG_MASKOS: u32 = 0x0ff00000;
 pub const FLAG_MASKPROC: u32 = 0xf0000000;
 
-pub fn sanity_check<'a>(ph: ProgramHeader<'a>, elf_file: &ElfFile<'a>) -> Result<(), &'static str> {
+pub fn sanity_check<'a, T: Reader + ?Sized>(ph: ProgramHeader<'a>, elf_file: &ElfFile<'a, T>) -> Result<(), &'static str> {
     let header = elf_file.header;
     match ph {
         ProgramHeader::Ph32(ph) => {

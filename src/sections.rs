@@ -10,6 +10,8 @@ use core::slice;
 #[cfg(feature = "compression")]
 use flate2::{Decompress, FlushDecompress};
 
+use crate::reader::Reader;
+
 use {P32, P64, ElfFile};
 use header::{Header, Class};
 use zero::{read, read_array, read_str, read_strs_to_null, StrReaderIterator, Pod};
@@ -17,7 +19,7 @@ use symbol_table;
 use dynamic::Dynamic;
 use hash::HashTable;
 
-pub fn parse_section_header<'a>(input: &'a [u8],
+pub fn parse_section_header<'a, T: Reader + ?Sized>(input: &'a T,
                                 header: Header<'a>,
                                 index: u16)
                                 -> Result<SectionHeader<'a>, &'static str> {
@@ -35,11 +37,11 @@ pub fn parse_section_header<'a>(input: &'a [u8],
 
     Ok(match header.pt1.class() {
         Class::ThirtyTwo => {
-            let header: &'a SectionHeader_<P32> = read(&input[start..end]);
+            let header: &'a SectionHeader_<P32> = read(input.read(start, end-start));
             SectionHeader::Sh32(header)
         }
         Class::SixtyFour => {
-            let header: &'a SectionHeader_<P64> = read(&input[start..end]);
+            let header: &'a SectionHeader_<P64> = read(input.read(start, end-start));
             SectionHeader::Sh64(header)
         }
         Class::None | Class::Other(_) => unreachable!(),
@@ -47,12 +49,12 @@ pub fn parse_section_header<'a>(input: &'a [u8],
 }
 
 #[derive(Debug, Clone)]
-pub struct SectionIter<'b, 'a: 'b> {
-    pub file: &'b ElfFile<'a>,
+pub struct SectionIter<'b, 'a: 'b, T: Reader + ?Sized> {
+    pub file: &'b ElfFile<'a, T>,
     pub next_index: u16,
 }
 
-impl<'b, 'a> Iterator for SectionIter<'b, 'a> {
+impl<'b, 'a, T: Reader + ?Sized> Iterator for SectionIter<'b, 'a, T> {
     type Item = SectionHeader<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -98,7 +100,7 @@ macro_rules! getter {
 
 impl<'a> SectionHeader<'a> {
     // Note that this function is O(n) in the length of the name.
-    pub fn get_name(&self, elf_file: &ElfFile<'a>) -> Result<&'a str, &'static str> {
+    pub fn get_name<T: Reader + ?Sized>(&self, elf_file: &ElfFile<'a, T>) -> Result<&'a str, &'static str> {
         self.get_type().and_then(|typ| match typ {
             ShType::Null => Err("Attempt to get name of null section"),
             _ => elf_file.get_shstr(self.name()),
@@ -109,7 +111,7 @@ impl<'a> SectionHeader<'a> {
         self.type_().as_sh_type()
     }
 
-    pub fn get_data(&self, elf_file: &ElfFile<'a>) -> Result<SectionData<'a>, &'static str> {
+    pub fn get_data<T: Reader + ?Sized>(&self, elf_file: &ElfFile<'a, T>) -> Result<SectionData<'a>, &'static str> {
         macro_rules! array_data {
             ($data32: ident, $data64: ident) => {{
                 let data = self.raw_data(elf_file);
@@ -170,9 +172,9 @@ impl<'a> SectionHeader<'a> {
         }))
     }
 
-    pub fn raw_data(&self, elf_file: &ElfFile<'a>) -> &'a [u8] {
+    pub fn raw_data<T: Reader + ?Sized>(&self, elf_file: &ElfFile<'a, T>) -> &'a [u8] {
         assert_ne!(self.get_type().unwrap(), ShType::Null);
-        &elf_file.input[self.offset() as usize..(self.offset() + self.size()) as usize]
+        elf_file.input.read(self.offset() as usize, self.size() as usize)
     }
 
     #[cfg(feature = "compression")]
@@ -579,7 +581,7 @@ impl NoteHeader {
     }
 }
 
-pub fn sanity_check<'a>(header: SectionHeader<'a>, _file: &ElfFile<'a>) -> Result<(), &'static str> {
+pub fn sanity_check<'a>(header: SectionHeader<'a>, _file: &ElfFile<'a, impl Reader>) -> Result<(), &'static str> {
     if header.get_type()? == ShType::Null {
         return Ok(());
     }

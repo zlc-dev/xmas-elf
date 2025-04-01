@@ -30,8 +30,10 @@ pub mod program;
 pub mod symbol_table;
 pub mod dynamic;
 pub mod hash;
+pub mod reader;
 
 use header::Header;
+use reader::Reader;
 use sections::{SectionHeader, SectionIter};
 use program::{ProgramHeader, ProgramIter};
 use zero::{read, read_str};
@@ -40,13 +42,13 @@ pub type P32 = u32;
 pub type P64 = u64;
 
 #[derive(Debug)]
-pub struct ElfFile<'a> {
-    pub input: &'a [u8],
+pub struct ElfFile<'a, T: Reader + ?Sized> {
+    pub input: &'a T,
     pub header: Header<'a>,
 }
 
-impl<'a> ElfFile<'a> {
-    pub fn new(input: &'a [u8]) -> Result<ElfFile<'a>, &'static str> {
+impl<'a, T: Reader + ?Sized> ElfFile<'a, T> {
+    pub fn new(input: &'a T) -> Result<ElfFile<'a, T>, &'static str> {
         header::parse_header(input).map(|header| ElfFile {input, header})
     }
 
@@ -111,7 +113,7 @@ impl<'a> ElfFile<'a> {
             if self.input.len() < offset {
                 return Err("File is shorter than section offset");
             }
-            Ok(&self.input[offset..])
+            Ok(self.input.read(offset, self.input.len()-offset))
         })
     }
 }
@@ -132,7 +134,7 @@ pub trait Extensions<'a> {
     fn get_gnu_debugaltlink(&self) -> Option<(&'a str, &'a [u8])>;
 }
 
-impl<'a> Extensions<'a> for ElfFile<'a> {
+impl<'a, T: Reader + ?Sized> Extensions<'a> for ElfFile<'a, T> {
     fn get_gnu_buildid(&self) -> Option<&'a [u8]> {
         self.find_section_by_name(".note.gnu.build-id")
             .and_then(|header| header.get_data(self).ok())
@@ -217,9 +219,9 @@ mod test {
 
     #[test]
     fn interpret_class() {
-        assert!(ElfFile::new(&mk_elf_header(0)).is_err());
-        assert!(ElfFile::new(&mk_elf_header(1)).is_ok());
-        assert!(ElfFile::new(&mk_elf_header(2)).is_ok());
-        assert!(ElfFile::new(&mk_elf_header(42u8)).is_err());
+        assert!(ElfFile::new(&mk_elf_header(0)[..]).is_err());
+        assert!(ElfFile::new(&mk_elf_header(1)[..]).is_ok());
+        assert!(ElfFile::new(&mk_elf_header(2)[..]).is_ok());
+        assert!(ElfFile::new(&mk_elf_header(42u8)[..]).is_err());
     }
 }

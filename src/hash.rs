@@ -61,10 +61,10 @@ impl<'a> HashTable<'a> {
         }
     }
 
-    pub fn lookup<F>(&'a self, _name: &str, _f: F) -> &'a dyn Entry
-        where F: Fn(&dyn Entry) -> bool
-    {
-        // TODO
-        unimplemented!();
-    }
+    // pub fn lookup<F>(&'a self, _name: &str, _f: F) -> &'a dyn Entry
+    //     where F: Fn(&dyn Entry) -> bool
+    // {
+    //     // TODO
+    //     unimplemented!();
+    // }
 }
